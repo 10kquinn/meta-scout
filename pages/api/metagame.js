@@ -1,5 +1,26 @@
 // api/metagame.js
-// Fetches Standard metagame data from MTGTop8
+// Fetches Standard metagame data - falls back to cached data if live fetch fails
+
+// Cached metagame data (updated manually when needed)
+const CACHED_META = {
+  source: "MTGTop8 (cached)",
+  format: "Standard",
+  period: "March 2026",
+  totalDecks: 730,
+  lastUpdated: "2026-03-19",
+  archetypes: [
+    { id: 207, name: "UR Aggro", metaShare: 21, trend: "up light" },
+    { id: 263, name: "Mono Green Aggro", metaShare: 16, trend: "up light" },
+    { id: 832, name: "Simic Aggro", metaShare: 7, trend: "stable" },
+    { id: 180, name: "Weenie White", metaShare: 4, trend: "up strong" },
+    { id: 346, name: "Boros Aggro", metaShare: 4, trend: "stable" },
+    { id: 770, name: "Dimir Aggro", metaShare: 4, trend: "down light" },
+    { id: 621, name: "Azorius Aggro", metaShare: 2, trend: "down light" },
+    { id: 386, name: "Temur Aggro", metaShare: 2, trend: "down strong" },
+    { id: 295, name: "Omniscience Combo", metaShare: 3, trend: "up light" },
+    { id: 500, name: "Dimir Control", metaShare: 3, trend: "stable" },
+  ],
+};
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -77,13 +98,16 @@ export default async function handler(req, res) {
       lastUpdated: new Date().toISOString(),
       archetypes: archetypes.slice(0, 15), // Top 15 archetypes
       recentEvents: events,
+      live: true,
     });
 
   } catch (error) {
     console.error("Metagame fetch error:", error);
-    return res.status(500).json({
-      error: "Failed to fetch metagame data",
-      message: error.message,
+    // Return cached data when live fetch fails
+    return res.status(200).json({
+      ...CACHED_META,
+      live: false,
+      error: error.message,
     });
   }
 }
