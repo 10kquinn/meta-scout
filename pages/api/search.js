@@ -16,7 +16,7 @@ const STORES = {
         const products = data?.resources?.results?.products || [];
         return products.map((p) => ({
           name: p.title,
-          price: p.price ? `$${(parseFloat(p.price) / 100).toFixed(2)}` : null,
+          price: p.price ? `$${parseFloat(p.price).toFixed(2)}` : null,
           available: p.available,
           url: `https://gamesportal.com.au${p.url}`,
           image: p.image,
@@ -36,7 +36,7 @@ const STORES = {
         const products = data?.resources?.results?.products || [];
         return products.map((p) => ({
           name: p.title,
-          price: p.price ? `$${(parseFloat(p.price) / 100).toFixed(2)}` : null,
+          price: p.price ? `$${parseFloat(p.price).toFixed(2)}` : null,
           available: p.available,
           url: `https://tcg.goodgames.com.au${p.url}`,
           image: p.image,
