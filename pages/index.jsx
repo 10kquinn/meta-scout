@@ -170,6 +170,10 @@ export default function App() {
   const [liveMeta, setLiveMeta] = useState(null);
   const [liveMetaLoading, setLiveMetaLoading] = useState(false);
   const [liveMetaError, setLiveMetaError] = useState(null);
+  // Decklist viewer state
+  const [selectedArch, setSelectedArch] = useState(null);
+  const [decklistData, setDecklistData] = useState(null);
+  const [decklistLoading, setDecklistLoading] = useState(false);
   useEffect(() => { setTimeout(() => setLoaded(true), 60); }, []);
 
   const toggle = n => setSel(p => p.includes(n) ? p.filter(x => x !== n) : [...p, n]);
@@ -394,36 +398,137 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {liveMeta.archetypes.map((arch, i) => (
-                          <tr key={arch.id || i} style={{ borderBottom: "1px solid rgba(255,255,255,0.025)" }}
-                            onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.025)"}
-                            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                            <td style={{ padding: "12px 14px", fontWeight: 500, display: "flex", alignItems: "center", gap: 10 }}>
-                              <span style={{ ...M, fontSize: 10, color: "rgba(255,255,255,0.3)", width: 20 }}>#{i + 1}</span>
-                              {arch.name}
-                            </td>
-                            <td style={{ textAlign: "right", padding: "12px 14px", ...M, fontWeight: 600, color: arch.metaShare >= 10 ? "#4F8EF7" : "#E2E0D8" }}>
-                              {arch.metaShare}%
-                            </td>
-                            <td style={{ textAlign: "center", padding: "12px 14px" }}>
-                              <span style={{ ...M, fontSize: 14, color: trendColor(arch.trend) }}>{trendIcon(arch.trend)}</span>
-                            </td>
-                            <td style={{ padding: "12px 14px", width: "30%" }}>
-                              <div style={{ height: 8, background: "rgba(255,255,255,0.05)", borderRadius: 4, overflow: "hidden" }}>
-                                <div style={{
-                                  height: "100%",
-                                  width: `${Math.min(arch.metaShare * 4, 100)}%`,
-                                  background: arch.metaShare >= 15 ? "#4F8EF7" : arch.metaShare >= 10 ? "#34D399" : "rgba(255,255,255,0.2)",
-                                  borderRadius: 4,
-                                  transition: "width 0.3s ease",
-                                }} />
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
+                        {liveMeta.archetypes.map((arch, i) => {
+                          const isSelected = selectedArch?.id === arch.id;
+                          return (
+                            <tr key={arch.id || i}
+                              onClick={async () => {
+                                if (isSelected) {
+                                  setSelectedArch(null);
+                                  setDecklistData(null);
+                                } else {
+                                  setSelectedArch(arch);
+                                  setDecklistLoading(true);
+                                  try {
+                                    const res = await fetch(`/api/decklist?archetype=${arch.id}`);
+                                    const data = await res.json();
+                                    setDecklistData(data);
+                                  } catch (err) {
+                                    setDecklistData({ error: err.message });
+                                  }
+                                  setDecklistLoading(false);
+                                }
+                              }}
+                              style={{
+                                borderBottom: "1px solid rgba(255,255,255,0.025)",
+                                cursor: "pointer",
+                                background: isSelected ? "rgba(79,142,247,0.1)" : "transparent",
+                                borderLeft: isSelected ? "3px solid #4F8EF7" : "3px solid transparent",
+                              }}
+                              onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "rgba(255,255,255,0.025)"; }}
+                              onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}>
+                              <td style={{ padding: "12px 14px", fontWeight: 500, display: "flex", alignItems: "center", gap: 10 }}>
+                                <span style={{ ...M, fontSize: 10, color: "rgba(255,255,255,0.3)", width: 20 }}>#{i + 1}</span>
+                                {arch.name}
+                                <span style={{ ...M, fontSize: 9, color: "rgba(255,255,255,0.2)", marginLeft: "auto" }}>click for decklist</span>
+                              </td>
+                              <td style={{ textAlign: "right", padding: "12px 14px", ...M, fontWeight: 600, color: arch.metaShare >= 10 ? "#4F8EF7" : "#E2E0D8" }}>
+                                {arch.metaShare}%
+                              </td>
+                              <td style={{ textAlign: "center", padding: "12px 14px" }}>
+                                <span style={{ ...M, fontSize: 14, color: trendColor(arch.trend) }}>{trendIcon(arch.trend)}</span>
+                              </td>
+                              <td style={{ padding: "12px 14px", width: "30%" }}>
+                                <div style={{ height: 8, background: "rgba(255,255,255,0.05)", borderRadius: 4, overflow: "hidden" }}>
+                                  <div style={{
+                                    height: "100%",
+                                    width: `${Math.min(arch.metaShare * 4, 100)}%`,
+                                    background: arch.metaShare >= 15 ? "#4F8EF7" : arch.metaShare >= 10 ? "#34D399" : "rgba(255,255,255,0.2)",
+                                    borderRadius: 4,
+                                    transition: "width 0.3s ease",
+                                  }} />
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Decklist Panel */}
+                  {selectedArch && (
+                    <div style={{ marginTop: 20, ...C, padding: 0, overflow: "hidden" }}>
+                      <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 600 }}>{selectedArch.name}</div>
+                          {decklistData && !decklistData.error && (
+                            <div style={{ ...M, fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>
+                              {decklistData.event} {decklistData.placement && `· ${decklistData.placement}`} {decklistData.player && `· ${decklistData.player}`}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          {decklistData?.url && (
+                            <a href={decklistData.url} target="_blank" rel="noopener noreferrer" style={{
+                              ...M, fontSize: 10, padding: "6px 12px", borderRadius: 4, textDecoration: "none",
+                              background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)",
+                            }}>View on MTGTop8</a>
+                          )}
+                          <button onClick={() => { setSelectedArch(null); setDecklistData(null); }} style={{
+                            ...M, fontSize: 10, padding: "6px 12px", borderRadius: 4, cursor: "pointer",
+                            background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)",
+                          }}>Close</button>
+                        </div>
+                      </div>
+
+                      {decklistLoading && (
+                        <div style={{ padding: 40, textAlign: "center", ...M, fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
+                          Loading decklist...
+                        </div>
+                      )}
+
+                      {decklistData?.error && (
+                        <div style={{ padding: 20, color: "#EF4444", fontSize: 12 }}>
+                          Failed to load decklist: {decklistData.error}
+                        </div>
+                      )}
+
+                      {decklistData && !decklistData.error && !decklistLoading && (
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0 }}>
+                          {/* Mainboard */}
+                          <div style={{ padding: "16px 20px", borderRight: "1px solid rgba(255,255,255,0.04)" }}>
+                            <div style={{ ...M, fontSize: 10, color: "rgba(255,255,255,0.35)", marginBottom: 10, textTransform: "uppercase" }}>
+                              Mainboard ({decklistData.mainboardCount})
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                              {decklistData.mainboard?.map((card, i) => (
+                                <div key={i} style={{ display: "flex", gap: 8, fontSize: 12, padding: "3px 0" }}>
+                                  <span style={{ ...M, color: "rgba(255,255,255,0.4)", width: 16, textAlign: "right" }}>{card.qty}</span>
+                                  <span style={{ color: "#E2E0D8" }}>{card.name}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Sideboard */}
+                          <div style={{ padding: "16px 20px" }}>
+                            <div style={{ ...M, fontSize: 10, color: "rgba(255,255,255,0.35)", marginBottom: 10, textTransform: "uppercase" }}>
+                              Sideboard ({decklistData.sideboardCount})
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                              {decklistData.sideboard?.map((card, i) => (
+                                <div key={i} style={{ display: "flex", gap: 8, fontSize: 12, padding: "3px 0" }}>
+                                  <span style={{ ...M, color: "rgba(255,255,255,0.4)", width: 16, textAlign: "right" }}>{card.qty}</span>
+                                  <span style={{ color: "#E2E0D8" }}>{card.name}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Recent events */}
                   {liveMeta.recentEvents && liveMeta.recentEvents.length > 0 && (
