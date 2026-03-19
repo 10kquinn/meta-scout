@@ -166,6 +166,10 @@ export default function App() {
   const [cardImages, setCardImages] = useState({});
   const [cardPrices, setCardPrices] = useState({});
   const [pricesLoading, setPricesLoading] = useState(false);
+  // Live metagame state
+  const [liveMeta, setLiveMeta] = useState(null);
+  const [liveMetaLoading, setLiveMetaLoading] = useState(false);
+  const [liveMetaError, setLiveMetaError] = useState(null);
   useEffect(() => { setTimeout(() => setLoaded(true), 60); }, []);
 
   const toggle = n => setSel(p => p.includes(n) ? p.filter(x => x !== n) : [...p, n]);
@@ -207,7 +211,7 @@ export default function App() {
 
         {/* TABS */}
         <div style={{ display: "flex", gap: 4, marginBottom: 24, ...F(0.08) }}>
-          {[["overview", "Overview"], ["matchups", "Matchup matrix"], ["picker", "Deck picker"], ["sourcer", "Card sourcer"], ["alerts", "Alerts"]].map(([k, l]) => (
+          {[["overview", "Overview"], ["live", "Live Meta"], ["matchups", "Matchup matrix"], ["picker", "Deck picker"], ["sourcer", "Card sourcer"], ["alerts", "Alerts"]].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} style={{
               ...M, fontSize: 12, fontWeight: 600, padding: "8px 20px", borderRadius: 6, cursor: "pointer",
               background: tab === k ? "rgba(255,255,255,0.08)" : "transparent",
@@ -285,6 +289,173 @@ export default function App() {
             </div>
           </section>
         </>}
+
+        {/* LIVE META */}
+        {tab === "live" && (() => {
+          const fetchLiveMeta = async () => {
+            setLiveMetaLoading(true);
+            setLiveMetaError(null);
+            try {
+              const res = await fetch("/api/metagame");
+              if (!res.ok) throw new Error("Failed to fetch");
+              const data = await res.json();
+              setLiveMeta(data);
+            } catch (err) {
+              setLiveMetaError(err.message);
+            }
+            setLiveMetaLoading(false);
+          };
+
+          // Auto-fetch on first render of this tab
+          if (!liveMeta && !liveMetaLoading && !liveMetaError) {
+            fetchLiveMeta();
+          }
+
+          const trendIcon = (trend) => {
+            if (trend?.includes("up strong")) return "↑↑";
+            if (trend?.includes("up")) return "↑";
+            if (trend?.includes("down strong")) return "↓↓";
+            if (trend?.includes("down")) return "↓";
+            return "→";
+          };
+
+          const trendColor = (trend) => {
+            if (trend?.includes("up")) return "#34D399";
+            if (trend?.includes("down")) return "#EF4444";
+            return "rgba(255,255,255,0.3)";
+          };
+
+          return (
+            <section style={F(0.08)}>
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
+                  <h2 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>Live Metagame Data</h2>
+                  {liveMeta?.live && (
+                    <span style={{ ...M, fontSize: 9, background: "rgba(52,211,153,0.15)", color: "#34D399", padding: "3px 8px", borderRadius: 4, fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#34D399", animation: "pulse 2s infinite" }} />
+                      LIVE
+                    </span>
+                  )}
+                  {liveMeta && !liveMeta.live && (
+                    <span style={{ ...M, fontSize: 9, background: "rgba(251,191,36,0.15)", color: "#FBBF24", padding: "3px 8px", borderRadius: 4, fontWeight: 600 }}>CACHED</span>
+                  )}
+                  <button onClick={fetchLiveMeta} disabled={liveMetaLoading} style={{
+                    ...M, fontSize: 10, padding: "4px 12px", borderRadius: 4, cursor: liveMetaLoading ? "wait" : "pointer",
+                    background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                    color: "rgba(255,255,255,0.5)", marginLeft: "auto",
+                  }}>{liveMetaLoading ? "Refreshing..." : "Refresh"}</button>
+                </div>
+                <p style={{ ...M, fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>
+                  {liveMeta ? `Source: ${liveMeta.source} · ${liveMeta.period} · ${liveMeta.totalDecks} decks tracked` : "Fetching live metagame data from MTGTop8..."}
+                </p>
+              </div>
+
+              {liveMetaLoading && !liveMeta && (
+                <div style={{ ...C, padding: 40, textAlign: "center" }}>
+                  <div style={{ ...M, fontSize: 13, color: "rgba(255,255,255,0.4)" }}>Loading live metagame data...</div>
+                </div>
+              )}
+
+              {liveMetaError && !liveMeta && (
+                <div style={{ ...C, padding: 20, borderLeft: "3px solid #EF4444" }}>
+                  <div style={{ fontSize: 13, color: "#EF4444", marginBottom: 4 }}>Failed to load live data</div>
+                  <div style={{ ...M, fontSize: 11, color: "rgba(255,255,255,0.4)" }}>{liveMetaError}</div>
+                </div>
+              )}
+
+              {liveMeta && (
+                <>
+                  {/* Stats cards */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, marginBottom: 24 }}>
+                    {[
+                      { label: "Top deck", val: liveMeta.archetypes[0]?.name || "—", sub: `${liveMeta.archetypes[0]?.metaShare || 0}% of field`, accent: "#4F8EF7" },
+                      { label: "Total decks", val: liveMeta.totalDecks?.toLocaleString() || "—", sub: liveMeta.period, accent: "#34D399" },
+                      { label: "Archetypes", val: liveMeta.archetypes?.length || 0, sub: "tracked", accent: "#A78BFA" },
+                      { label: "Data source", val: liveMeta.source?.replace(" (cached)", ""), sub: liveMeta.live ? "Live" : "Cached", accent: liveMeta.live ? "#34D399" : "#FBBF24" },
+                    ].map((m, i) => (
+                      <div key={i} style={{ ...C, padding: "14px 16px", position: "relative", overflow: "hidden" }}>
+                        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: m.accent, opacity: 0.35 }} />
+                        <div style={{ ...M, fontSize: 9, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", letterSpacing: "0.7px", marginBottom: 6 }}>{m.label}</div>
+                        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 3 }}>{m.val}</div>
+                        <div style={{ ...M, fontSize: 11, color: m.accent }}>{m.sub}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Archetype breakdown */}
+                  <div style={{ ...C, overflow: "hidden" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                          <th style={{ textAlign: "left", padding: "10px 14px", ...M, fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.25)", textTransform: "uppercase" }}>Archetype</th>
+                          <th style={{ textAlign: "right", padding: "10px 14px", ...M, fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.25)", textTransform: "uppercase" }}>Meta %</th>
+                          <th style={{ textAlign: "center", padding: "10px 14px", ...M, fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.25)", textTransform: "uppercase" }}>Trend</th>
+                          <th style={{ textAlign: "left", padding: "10px 14px", ...M, fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.25)", textTransform: "uppercase" }}>Share</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {liveMeta.archetypes.map((arch, i) => (
+                          <tr key={arch.id || i} style={{ borderBottom: "1px solid rgba(255,255,255,0.025)" }}
+                            onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.025)"}
+                            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                            <td style={{ padding: "12px 14px", fontWeight: 500, display: "flex", alignItems: "center", gap: 10 }}>
+                              <span style={{ ...M, fontSize: 10, color: "rgba(255,255,255,0.3)", width: 20 }}>#{i + 1}</span>
+                              {arch.name}
+                            </td>
+                            <td style={{ textAlign: "right", padding: "12px 14px", ...M, fontWeight: 600, color: arch.metaShare >= 10 ? "#4F8EF7" : "#E2E0D8" }}>
+                              {arch.metaShare}%
+                            </td>
+                            <td style={{ textAlign: "center", padding: "12px 14px" }}>
+                              <span style={{ ...M, fontSize: 14, color: trendColor(arch.trend) }}>{trendIcon(arch.trend)}</span>
+                            </td>
+                            <td style={{ padding: "12px 14px", width: "30%" }}>
+                              <div style={{ height: 8, background: "rgba(255,255,255,0.05)", borderRadius: 4, overflow: "hidden" }}>
+                                <div style={{
+                                  height: "100%",
+                                  width: `${Math.min(arch.metaShare * 4, 100)}%`,
+                                  background: arch.metaShare >= 15 ? "#4F8EF7" : arch.metaShare >= 10 ? "#34D399" : "rgba(255,255,255,0.2)",
+                                  borderRadius: 4,
+                                  transition: "width 0.3s ease",
+                                }} />
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Recent events */}
+                  {liveMeta.recentEvents && liveMeta.recentEvents.length > 0 && (
+                    <div style={{ marginTop: 24 }}>
+                      <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 12px" }}>Recent Tournaments</h3>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                        {liveMeta.recentEvents.map((event, i) => (
+                          <div key={i} style={{ ...C, padding: "14px 16px" }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>{event.name}</div>
+                            {event.date && <div style={{ ...M, fontSize: 10, color: "rgba(255,255,255,0.35)", marginBottom: 8 }}>{event.date}</div>}
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                              {event.top8?.slice(0, 4).map((deck, j) => (
+                                <span key={j} style={{ ...M, fontSize: 9, padding: "2px 6px", background: "rgba(255,255,255,0.05)", borderRadius: 3, color: "rgba(255,255,255,0.5)" }}>
+                                  {deck}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Last updated */}
+                  <div style={{ marginTop: 20, ...M, fontSize: 10, color: "rgba(255,255,255,0.25)", textAlign: "right" }}>
+                    Last updated: {liveMeta.lastUpdated ? new Date(liveMeta.lastUpdated).toLocaleString() : "Unknown"}
+                  </div>
+                </>
+              )}
+            </section>
+          );
+        })()}
 
         {/* MATCHUP MATRIX */}
         {tab === "matchups" && (
