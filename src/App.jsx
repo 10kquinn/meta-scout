@@ -150,6 +150,16 @@ export default function App() {
   const [filterTier, setFilterTier] = useState("all");
   const [tab, setTab] = useState("overview");
   const [loaded, setLoaded] = useState(false);
+  // Deck picker: predicted field % for each matchup deck, initialized from latest actual data
+  const [predicted, setPredicted] = useState(() => {
+    const init = {};
+    MU_NAMES.forEach(n => {
+      const dk = DECKS.find(d => d.name === n);
+      init[n] = dk ? dk.field[3] : 5;
+    });
+    init["Other"] = Math.max(0, 100 - MU_NAMES.reduce((s, n) => s + (init[n] || 0), 0));
+    return init;
+  });
   useEffect(() => { setTimeout(() => setLoaded(true), 60); }, []);
 
   const toggle = n => setSel(p => p.includes(n) ? p.filter(x => x !== n) : [...p, n]);
@@ -191,7 +201,7 @@ export default function App() {
 
         {/* TABS */}
         <div style={{ display: "flex", gap: 4, marginBottom: 24, ...F(0.08) }}>
-          {[["overview", "Overview"], ["matchups", "Matchup matrix"], ["alerts", "Alerts"]].map(([k, l]) => (
+          {[["overview", "Overview"], ["matchups", "Matchup matrix"], ["picker", "Deck picker"], ["alerts", "Alerts"]].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} style={{
               ...M, fontSize: 12, fontWeight: 600, padding: "8px 20px", borderRadius: 6, cursor: "pointer",
               background: tab === k ? "rgba(255,255,255,0.08)" : "transparent",
@@ -317,6 +327,184 @@ export default function App() {
             </div>
           </section>
         )}
+
+        {/* DECK PICKER — EV CALCULATOR */}
+        {tab === "picker" && (() => {
+          // Calculate expected win rate for each deck against predicted field
+          const totalPredicted = Object.values(predicted).reduce((s, v) => s + v, 0);
+          const evResults = MU_NAMES.map((deckName, di) => {
+            let weightedWR = 0;
+            let totalWeight = 0;
+            MU_NAMES.forEach((oppName, oi) => {
+              if (di === oi) return; // skip mirror
+              const wr = MU_DATA[di][oi];
+              if (wr === null) return;
+              const oppShare = predicted[oppName] || 0;
+              weightedWR += wr * oppShare;
+              totalWeight += oppShare;
+            });
+            // "Other" matchups assumed 50%
+            const otherShare = predicted["Other"] || 0;
+            weightedWR += 50 * otherShare;
+            totalWeight += otherShare;
+            const ev = totalWeight > 0 ? weightedWR / totalWeight : 50;
+            return { name: deckName, ev, color: DECKS.find(d => d.name === deckName)?.color || "#888" };
+          }).sort((a, b) => b.ev - a.ev);
+
+          const bestDeck = evResults[0];
+          const worstDeck = evResults[evResults.length - 1];
+          const spread = bestDeck.ev - worstDeck.ev;
+
+          const updateSlider = (name, val) => {
+            setPredicted(prev => {
+              const next = { ...prev, [name]: parseFloat(val) };
+              const assigned = MU_NAMES.reduce((s, n) => s + (next[n] || 0), 0);
+              next["Other"] = Math.max(0, parseFloat((100 - assigned).toFixed(1)));
+              return next;
+            });
+          };
+
+          const resetToLatest = () => {
+            const init = {};
+            MU_NAMES.forEach(n => {
+              const dk = DECKS.find(d => d.name === n);
+              init[n] = dk ? dk.field[3] : 5;
+            });
+            init["Other"] = Math.max(0, parseFloat((100 - MU_NAMES.reduce((s, n) => s + (init[n] || 0), 0)).toFixed(1)));
+            setPredicted(init);
+          };
+
+          return (
+            <section style={F(0.08)}>
+              <div style={{ marginBottom: 20 }}>
+                <h2 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 6px" }}>Deck picker — EV calculator</h2>
+                <p style={{ ...M, fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>
+                  Predict the meta with sliders → see the mathematically optimal deck choice based on matchup win rates
+                </p>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+                {/* LEFT: Sliders */}
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                    <h3 style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>Predicted field composition</h3>
+                    <button onClick={resetToLatest} style={{
+                      ...M, fontSize: 10, padding: "4px 12px", borderRadius: 4, cursor: "pointer", fontWeight: 600,
+                      background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)",
+                      color: "rgba(255,255,255,0.4)", transition: "all 0.15s",
+                    }}>Reset to latest</button>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {MU_NAMES.map(name => {
+                      const dk = DECKS.find(d => d.name === name);
+                      const val = predicted[name] || 0;
+                      return (
+                        <div key={name} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{ width: 4, height: 20, borderRadius: 2, background: dk?.color || "#888", flexShrink: 0 }} />
+                          <span style={{ fontSize: 12, fontWeight: 500, width: 120, flexShrink: 0 }}>{MU_SHORT[MU_NAMES.indexOf(name)]}</span>
+                          <input
+                            type="range" min="0" max="40" step="0.5" value={val}
+                            onChange={e => updateSlider(name, e.target.value)}
+                            style={{ flex: 1, accentColor: dk?.color || "#888", height: 4, cursor: "pointer" }}
+                          />
+                          <span style={{ ...M, fontSize: 12, fontWeight: 600, width: 48, textAlign: "right", color: val > 10 ? "#E2E0D8" : "rgba(255,255,255,0.4)" }}>
+                            {val.toFixed(1)}%
+                          </span>
+                        </div>
+                      );
+                    })}
+
+                    {/* Other (auto-calculated) */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, opacity: 0.5 }}>
+                      <span style={{ width: 4, height: 20, borderRadius: 2, background: "rgba(255,255,255,0.2)", flexShrink: 0 }} />
+                      <span style={{ fontSize: 12, fontWeight: 500, width: 120, flexShrink: 0 }}>Other</span>
+                      <div style={{ flex: 1, height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2 }} />
+                      <span style={{ ...M, fontSize: 12, fontWeight: 600, width: 48, textAlign: "right" }}>
+                        {(predicted["Other"] || 0).toFixed(1)}%
+                      </span>
+                    </div>
+
+                    {/* Total indicator */}
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
+                      <span style={{
+                        ...M, fontSize: 10, fontWeight: 600, padding: "3px 10px", borderRadius: 4,
+                        background: Math.abs(totalPredicted - 100) < 0.5 ? "rgba(52,211,153,0.1)" : "rgba(239,68,68,0.1)",
+                        color: Math.abs(totalPredicted - 100) < 0.5 ? "#34D399" : "#EF4444",
+                      }}>
+                        Total: {totalPredicted.toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* RIGHT: Results */}
+                <div>
+                  {/* Best deck highlight */}
+                  <div style={{
+                    ...C, padding: "20px 24px", marginBottom: 16,
+                    borderLeft: `3px solid ${bestDeck.color}`, position: "relative", overflow: "hidden",
+                  }}>
+                    <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: bestDeck.color, opacity: 0.3 }} />
+                    <div style={{ ...M, fontSize: 9, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 8 }}>Optimal deck choice</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 4, color: bestDeck.color }}>{bestDeck.name}</div>
+                    <div style={{ ...M, fontSize: 14 }}>
+                      <span style={{ color: "#34D399", fontWeight: 600 }}>{bestDeck.ev.toFixed(2)}%</span>
+                      <span style={{ color: "rgba(255,255,255,0.3)" }}> expected WR vs this field</span>
+                    </div>
+                    <div style={{ ...M, fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 6 }}>
+                      {spread.toFixed(1)}pp edge over worst option ({worstDeck.name})
+                    </div>
+                  </div>
+
+                  {/* Ranked results */}
+                  <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 10px" }}>Expected win rates vs predicted field</h3>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {evResults.map((r, i) => {
+                      const barW = Math.max(0, ((r.ev - 44) / (bestDeck.ev - 44)) * 100);
+                      const isTop = i === 0;
+                      return (
+                        <div key={r.name} style={{
+                          display: "flex", alignItems: "center", gap: 10, padding: "8px 12px",
+                          borderRadius: 6, background: isTop ? "rgba(52,211,153,0.06)" : "rgba(255,255,255,0.015)",
+                          border: isTop ? "1px solid rgba(52,211,153,0.15)" : "1px solid rgba(255,255,255,0.03)",
+                        }}>
+                          <span style={{
+                            ...M, fontSize: 10, fontWeight: 700, width: 20, textAlign: "center",
+                            color: i === 0 ? "#34D399" : i <= 2 ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.25)",
+                          }}>#{i + 1}</span>
+                          <span style={{ width: 4, height: 18, borderRadius: 2, background: r.color, flexShrink: 0 }} />
+                          <span style={{ fontSize: 12, fontWeight: 500, width: 120, flexShrink: 0 }}>{r.name}</span>
+                          <div style={{ flex: 1, height: 6, background: "rgba(255,255,255,0.04)", borderRadius: 3, overflow: "hidden" }}>
+                            <div style={{
+                              height: "100%", width: `${barW}%`, borderRadius: 3,
+                              background: r.ev >= 52 ? r.color : "rgba(255,255,255,0.15)",
+                              opacity: r.ev >= 52 ? 0.6 : 0.4, transition: "width 0.3s ease",
+                            }} />
+                          </div>
+                          <span style={{
+                            ...M, fontSize: 12, fontWeight: 700, width: 56, textAlign: "right",
+                            color: r.ev >= 53 ? "#34D399" : r.ev >= 51 ? "#E2E0D8" : r.ev >= 49 ? "rgba(255,255,255,0.4)" : "#EF4444",
+                          }}>{r.ev.toFixed(2)}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Methodology note */}
+                  <div style={{ marginTop: 16, padding: "12px 14px", borderRadius: 6, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)" }}>
+                    <div style={{ ...M, fontSize: 9, color: "rgba(255,255,255,0.25)", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>Methodology</div>
+                    <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", lineHeight: 1.6, margin: 0 }}>
+                      For each deck, expected WR = Σ(matchup WR × opponent's predicted field %) / total predicted field.
+                      "Other" matchups are assumed 50/50. Based on the matchup matrix data from RC results and MTGO Challenges.
+                      Mirror matches are excluded from the calculation.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </section>
+          );
+        })()}
 
         {/* ALERTS */}
         {tab === "alerts" && (
