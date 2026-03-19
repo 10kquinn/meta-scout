@@ -164,6 +164,8 @@ export default function App() {
   const [decklistText, setDecklistText] = useState("");
   const [parsedCards, setParsedCards] = useState([]);
   const [cardImages, setCardImages] = useState({});
+  const [cardPrices, setCardPrices] = useState({});
+  const [pricesLoading, setPricesLoading] = useState(false);
   useEffect(() => { setTimeout(() => setLoaded(true), 60); }, []);
 
   const toggle = n => setSel(p => p.includes(n) ? p.filter(x => x !== n) : [...p, n]);
@@ -540,10 +542,13 @@ export default function App() {
             return cards;
           };
 
-          const handleParse = () => {
+          const handleParse = async () => {
             const cards = parseDecklist(decklistText);
             setParsedCards(cards);
-            // Fetch images from Scryfall for the first 20 unique cards
+            setCardPrices({});
+            setPricesLoading(true);
+
+            // Fetch images from Scryfall for unique cards
             const unique = [...new Set(cards.map(c => c.name))].slice(0, 30);
             unique.forEach(name => {
               if (cardImages[name]) return;
@@ -558,6 +563,22 @@ export default function App() {
                 })
                 .catch(() => {});
             });
+
+            // Fetch live prices from our API for each unique card
+            for (const name of unique) {
+              try {
+                const res = await fetch(`/api/search?q=${encodeURIComponent(name)}`);
+                if (res.ok) {
+                  const data = await res.json();
+                  setCardPrices(prev => ({ ...prev, [name]: data }));
+                }
+              } catch (err) {
+                console.error(`Failed to fetch prices for ${name}:`, err);
+              }
+              // Small delay to avoid hammering the API
+              await new Promise(r => setTimeout(r, 150));
+            }
+            setPricesLoading(false);
           };
 
           const mainCards = parsedCards.filter(c => c.section === "main");
@@ -601,8 +622,16 @@ Sideboard
               <div style={{ marginBottom: 20 }}>
                 <h2 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 6px" }}>Card sourcer</h2>
                 <p style={{ ...M, fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>
-                  Paste a decklist → get direct links to search each card across Australian stores
+                  Paste a decklist → get live prices from Australian stores (Games Portal, Good Games, MTG Mate)
                 </p>
+                <div style={{ display: "flex", gap: 12, marginTop: 10 }}>
+                  {STORES.map(s => (
+                    <span key={s.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "rgba(255,255,255,0.4)" }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color }} />
+                      {s.name}
+                    </span>
+                  ))}
+                </div>
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: parsedCards.length > 0 ? "320px 1fr" : "1fr", gap: 20 }}>
@@ -627,11 +656,12 @@ Sideboard
                       lineHeight: 1.7, outline: "none",
                     }}
                   />
-                  <button onClick={handleParse} style={{
-                    width: "100%", marginTop: 10, padding: "10px 0", borderRadius: 6, cursor: "pointer",
-                    fontSize: 13, fontWeight: 600, background: "rgba(79,142,247,0.12)", border: "1px solid rgba(79,142,247,0.25)",
-                    color: "#4F8EF7", transition: "all 0.15s", fontFamily: "'DM Sans', sans-serif",
-                  }}>Parse decklist & find cards</button>
+                  <button onClick={handleParse} disabled={pricesLoading} style={{
+                    width: "100%", marginTop: 10, padding: "10px 0", borderRadius: 6, cursor: pricesLoading ? "wait" : "pointer",
+                    fontSize: 13, fontWeight: 600, background: pricesLoading ? "rgba(255,255,255,0.05)" : "rgba(79,142,247,0.12)",
+                    border: `1px solid ${pricesLoading ? "rgba(255,255,255,0.1)" : "rgba(79,142,247,0.25)"}`,
+                    color: pricesLoading ? "rgba(255,255,255,0.4)" : "#4F8EF7", transition: "all 0.15s", fontFamily: "'DM Sans', sans-serif",
+                  }}>{pricesLoading ? "Fetching prices..." : "Parse decklist & fetch prices"}</button>
 
                   {parsedCards.length > 0 && (
                     <div style={{ marginTop: 14, display: "flex", gap: 10 }}>
@@ -662,46 +692,85 @@ Sideboard
                             {group.label} ({group.cards.reduce((s, c) => s + c.qty, 0)})
                           </h3>
                           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            {group.cards.map((card, i) => (
-                              <div key={i} style={{
-                                display: "flex", alignItems: "center", gap: 10, padding: "8px 12px",
-                                borderRadius: 6, background: "rgba(255,255,255,0.015)",
-                                border: "1px solid rgba(255,255,255,0.03)", transition: "background 0.1s",
-                              }}
-                                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.035)"}
-                                onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.015)"}
-                              >
-                                {/* Card image thumbnail */}
-                                {cardImages[card.name] ? (
-                                  <img src={cardImages[card.name]} alt={card.name} style={{ width: 32, height: 44, borderRadius: 3, objectFit: "cover", flexShrink: 0 }} />
-                                ) : (
-                                  <div style={{ width: 32, height: 44, borderRadius: 3, background: "rgba(255,255,255,0.05)", flexShrink: 0 }} />
-                                )}
+                            {group.cards.map((card, i) => {
+                              const prices = cardPrices[card.name];
+                              const isLoadingPrice = pricesLoading && !prices;
 
-                                {/* Qty */}
-                                <span style={{ ...M, fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.4)", width: 20, textAlign: "center", flexShrink: 0 }}>{card.qty}x</span>
+                              // Extract best prices from each store
+                              const storePrices = {};
+                              if (prices?.stores) {
+                                prices.stores.forEach(s => {
+                                  if (s.results && s.results.length > 0) {
+                                    const best = s.results[0];
+                                    storePrices[s.key] = {
+                                      price: best.price,
+                                      available: best.available,
+                                      url: best.url,
+                                      name: s.store
+                                    };
+                                  }
+                                });
+                              }
 
-                                {/* Name */}
-                                <span style={{ fontSize: 13, fontWeight: 500, flex: 1 }}>{card.name}</span>
+                              return (
+                                <div key={i} style={{
+                                  display: "flex", alignItems: "center", gap: 10, padding: "8px 12px",
+                                  borderRadius: 6, background: "rgba(255,255,255,0.015)",
+                                  border: "1px solid rgba(255,255,255,0.03)", transition: "background 0.1s",
+                                }}
+                                  onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.035)"}
+                                  onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.015)"}
+                                >
+                                  {/* Card image thumbnail */}
+                                  {cardImages[card.name] ? (
+                                    <img src={cardImages[card.name]} alt={card.name} style={{ width: 32, height: 44, borderRadius: 3, objectFit: "cover", flexShrink: 0 }} />
+                                  ) : (
+                                    <div style={{ width: 32, height: 44, borderRadius: 3, background: "rgba(255,255,255,0.05)", flexShrink: 0 }} />
+                                  )}
 
-                                {/* Store links */}
-                                <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                                  {STORES.map(store => (
-                                    <a key={store.key} href={store.url(card.name)} target="_blank" rel="noopener noreferrer" style={{
-                                      ...M, fontSize: 9, fontWeight: 600, padding: "3px 8px", borderRadius: 4,
-                                      background: `${store.color}12`, color: store.color, textDecoration: "none",
-                                      border: `1px solid ${store.color}25`, transition: "all 0.1s",
-                                      whiteSpace: "nowrap",
-                                    }}
-                                      onMouseEnter={e => { e.currentTarget.style.background = `${store.color}25`; }}
-                                      onMouseLeave={e => { e.currentTarget.style.background = `${store.color}12`; }}
-                                    >
-                                      {store.name}
-                                    </a>
-                                  ))}
+                                  {/* Qty */}
+                                  <span style={{ ...M, fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.4)", width: 20, textAlign: "center", flexShrink: 0 }}>{card.qty}x</span>
+
+                                  {/* Name */}
+                                  <span style={{ fontSize: 13, fontWeight: 500, minWidth: 140, flex: 1 }}>{card.name}</span>
+
+                                  {/* Store prices */}
+                                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                                    {isLoadingPrice ? (
+                                      <span style={{ ...M, fontSize: 10, color: "rgba(255,255,255,0.3)" }}>Loading...</span>
+                                    ) : (
+                                      STORES.map(store => {
+                                        const sp = storePrices[store.key];
+                                        const hasPrice = sp && sp.price;
+                                        const inStock = sp?.available !== false;
+
+                                        return (
+                                          <a
+                                            key={store.key}
+                                            href={sp?.url || store.url(card.name)}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            style={{
+                                              ...M, fontSize: 10, fontWeight: 600, padding: "4px 8px", borderRadius: 4,
+                                              background: hasPrice ? `${store.color}15` : "rgba(255,255,255,0.03)",
+                                              color: hasPrice ? (inStock ? store.color : "rgba(255,255,255,0.3)") : "rgba(255,255,255,0.2)",
+                                              textDecoration: inStock ? "none" : "line-through",
+                                              border: `1px solid ${hasPrice ? store.color + "30" : "rgba(255,255,255,0.05)"}`,
+                                              transition: "all 0.1s", whiteSpace: "nowrap", minWidth: 65, textAlign: "center",
+                                            }}
+                                            onMouseEnter={e => { e.currentTarget.style.background = `${store.color}30`; }}
+                                            onMouseLeave={e => { e.currentTarget.style.background = hasPrice ? `${store.color}15` : "rgba(255,255,255,0.03)"; }}
+                                            title={`${store.name}${sp ? (inStock ? " - In Stock" : " - Out of Stock") : ""}`}
+                                          >
+                                            {hasPrice ? sp.price : "—"}
+                                          </a>
+                                        );
+                                      })
+                                    )}
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       ))}
