@@ -14,14 +14,19 @@ const STORES = {
     parseResults: (data) => {
       try {
         const products = data?.resources?.results?.products || [];
-        return products.map((p) => ({
-          name: p.title,
-          price: p.price ? `$${parseFloat(p.price).toFixed(2)}` : null,
-          available: p.available,
-          url: `https://gamesportal.com.au${p.url}`,
-          image: p.image,
-          store: "Games Portal",
-        }));
+        return products.map((p) => {
+          // Use price_max for Near Mint condition (price_min is damaged/cheapest)
+          const nmPrice = p.price_max || p.price;
+          return {
+            name: p.title,
+            price: nmPrice ? `$${parseFloat(nmPrice).toFixed(2)}` : null,
+            priceMin: p.price_min ? `$${parseFloat(p.price_min).toFixed(2)}` : null,
+            available: p.available,
+            url: `https://gamesportal.com.au${p.url}`,
+            image: p.image,
+            store: "Games Portal",
+          };
+        });
       } catch {
         return [];
       }
@@ -34,14 +39,19 @@ const STORES = {
     parseResults: (data) => {
       try {
         const products = data?.resources?.results?.products || [];
-        return products.map((p) => ({
-          name: p.title,
-          price: p.price ? `$${parseFloat(p.price).toFixed(2)}` : null,
-          available: p.available,
-          url: `https://tcg.goodgames.com.au${p.url}`,
-          image: p.image,
-          store: "Good Games",
-        }));
+        return products.map((p) => {
+          // Use price_max for Near Mint condition (price_min is damaged/cheapest)
+          const nmPrice = p.price_max || p.price;
+          return {
+            name: p.title,
+            price: nmPrice ? `$${parseFloat(nmPrice).toFixed(2)}` : null,
+            priceMin: p.price_min ? `$${parseFloat(p.price_min).toFixed(2)}` : null,
+            available: p.available,
+            url: `https://tcg.goodgames.com.au${p.url}`,
+            image: p.image,
+            store: "Good Games",
+          };
+        });
       } catch {
         return [];
       }
