@@ -160,6 +160,10 @@ export default function App() {
     init["Other"] = Math.max(0, 100 - MU_NAMES.reduce((s, n) => s + (init[n] || 0), 0));
     return init;
   });
+  // Card sourcer state
+  const [decklistText, setDecklistText] = useState("");
+  const [parsedCards, setParsedCards] = useState([]);
+  const [cardImages, setCardImages] = useState({});
   useEffect(() => { setTimeout(() => setLoaded(true), 60); }, []);
 
   const toggle = n => setSel(p => p.includes(n) ? p.filter(x => x !== n) : [...p, n]);
@@ -201,7 +205,7 @@ export default function App() {
 
         {/* TABS */}
         <div style={{ display: "flex", gap: 4, marginBottom: 24, ...F(0.08) }}>
-          {[["overview", "Overview"], ["matchups", "Matchup matrix"], ["picker", "Deck picker"], ["alerts", "Alerts"]].map(([k, l]) => (
+          {[["overview", "Overview"], ["matchups", "Matchup matrix"], ["picker", "Deck picker"], ["sourcer", "Card sourcer"], ["alerts", "Alerts"]].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} style={{
               ...M, fontSize: 12, fontWeight: 600, padding: "8px 20px", borderRadius: 6, cursor: "pointer",
               background: tab === k ? "rgba(255,255,255,0.08)" : "transparent",
@@ -501,6 +505,229 @@ export default function App() {
                     </p>
                   </div>
                 </div>
+              </div>
+            </section>
+          );
+        })()}
+
+        {/* CARD SOURCER */}
+        {tab === "sourcer" && (() => {
+          const STORES = [
+            { name: "MTG Mate", key: "mtgmate", color: "#34D399", url: (card) => `https://www.mtgmate.com.au/cards/${encodeURIComponent(card.replace(/ /g, " "))}` },
+            { name: "Good Games", key: "goodgames", color: "#4F8EF7", url: (card) => `https://tcg.goodgames.com.au/search?q=${encodeURIComponent(card)}` },
+            { name: "Games Portal", key: "gamesportal", color: "#F59E0B", url: (card) => `https://gamesportal.com.au/search?q=${encodeURIComponent(card)}&type=product` },
+          ];
+
+          const parseDecklist = (text) => {
+            const lines = text.trim().split("\n");
+            const cards = [];
+            let section = "main";
+            for (const raw of lines) {
+              const line = raw.trim();
+              if (!line) continue;
+              if (/^(sideboard|sb)/i.test(line) || line === "//Sideboard" || line.toLowerCase() === "sideboard") { section = "sideboard"; continue; }
+              if (/^(companion|commander|deck)/i.test(line) || line.startsWith("//")) continue;
+              // Match: "4 Card Name" or "4x Card Name" or "4 Card Name (SET) 123"
+              const m = line.match(/^(\d+)x?\s+(.+?)(?:\s+\([A-Z0-9]+\))?(?:\s+\d+)?$/i);
+              if (m) {
+                const qty = parseInt(m[1]);
+                let name = m[2].trim();
+                // Strip set code and collector number from Arena format
+                name = name.replace(/\s*\([A-Z0-9]+\)\s*\d*$/, "").trim();
+                cards.push({ qty, name, section });
+              }
+            }
+            return cards;
+          };
+
+          const handleParse = () => {
+            const cards = parseDecklist(decklistText);
+            setParsedCards(cards);
+            // Fetch images from Scryfall for the first 20 unique cards
+            const unique = [...new Set(cards.map(c => c.name))].slice(0, 30);
+            unique.forEach(name => {
+              if (cardImages[name]) return;
+              fetch(`https://api.scryfall.com/cards/named?fuzzy=${encodeURIComponent(name)}`)
+                .then(r => r.ok ? r.json() : null)
+                .then(data => {
+                  if (data?.image_uris?.small) {
+                    setCardImages(prev => ({ ...prev, [name]: data.image_uris.small }));
+                  } else if (data?.card_faces?.[0]?.image_uris?.small) {
+                    setCardImages(prev => ({ ...prev, [name]: data.card_faces[0].image_uris.small }));
+                  }
+                })
+                .catch(() => {});
+            });
+          };
+
+          const mainCards = parsedCards.filter(c => c.section === "main");
+          const sideCards = parsedCards.filter(c => c.section === "sideboard");
+          const totalMain = mainCards.reduce((s, c) => s + c.qty, 0);
+          const totalSide = sideCards.reduce((s, c) => s + c.qty, 0);
+
+          const SAMPLE = `4 Stormchaser's Talent
+4 Slickshot Show-Off
+4 Monument to Endurance
+4 Firebending Lesson
+4 Accumulate Wisdom
+3 Iroh's Demonstration
+4 Combustion Technique
+4 Artist's Talent
+4 Multiversal Passage
+4 Riverpyre Verge
+4 Spirebluff Canal
+7 Island
+2 Mountain
+3 Boomerang Basics
+1 Agna Qel'a
+4 Gran-Gran
+
+Sideboard
+2 Negate
+1 Annul
+1 Torch the Tower
+1 Iroh's Demonstration
+1 Abandon Attachments
+1 Abrade
+1 Pyroclasm
+2 Quantum Riddler
+2 Soul-Guide Lantern
+1 It'll Quench Ya!
+1 Spell Pierce
+1 Broadside Barrage`;
+
+          return (
+            <section style={F(0.08)}>
+              <div style={{ marginBottom: 20 }}>
+                <h2 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 6px" }}>Card sourcer</h2>
+                <p style={{ ...M, fontSize: 11, color: "rgba(255,255,255,0.35)", margin: 0 }}>
+                  Paste a decklist → get direct links to search each card across Australian stores
+                </p>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: parsedCards.length > 0 ? "320px 1fr" : "1fr", gap: 20 }}>
+                {/* Input */}
+                <div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <h3 style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>Decklist</h3>
+                    <button onClick={() => { setDecklistText(SAMPLE); }} style={{
+                      ...M, fontSize: 10, padding: "4px 12px", borderRadius: 4, cursor: "pointer", fontWeight: 600,
+                      background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)",
+                      color: "rgba(255,255,255,0.4)", transition: "all 0.15s",
+                    }}>Load example (Izzet Lessons)</button>
+                  </div>
+                  <textarea
+                    value={decklistText}
+                    onChange={e => setDecklistText(e.target.value)}
+                    placeholder={"Paste MTGO/Arena decklist here...\n\n4 Lightning Bolt\n4 Counterspell\n...\n\nSideboard\n2 Negate\n..."}
+                    style={{
+                      width: "100%", minHeight: 320, padding: 14, borderRadius: 8, fontSize: 12,
+                      fontFamily: "'DM Mono', monospace", background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.08)", color: "#E2E0D8", resize: "vertical",
+                      lineHeight: 1.7, outline: "none",
+                    }}
+                  />
+                  <button onClick={handleParse} style={{
+                    width: "100%", marginTop: 10, padding: "10px 0", borderRadius: 6, cursor: "pointer",
+                    fontSize: 13, fontWeight: 600, background: "rgba(79,142,247,0.12)", border: "1px solid rgba(79,142,247,0.25)",
+                    color: "#4F8EF7", transition: "all 0.15s", fontFamily: "'DM Sans', sans-serif",
+                  }}>Parse decklist & find cards</button>
+
+                  {parsedCards.length > 0 && (
+                    <div style={{ marginTop: 14, display: "flex", gap: 10 }}>
+                      <div style={{ ...C, padding: "10px 14px", flex: 1, textAlign: "center" }}>
+                        <div style={{ ...M, fontSize: 9, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", marginBottom: 4 }}>Main</div>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: totalMain === 60 ? "#34D399" : "#F59E0B" }}>{totalMain}</div>
+                      </div>
+                      <div style={{ ...C, padding: "10px 14px", flex: 1, textAlign: "center" }}>
+                        <div style={{ ...M, fontSize: 9, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", marginBottom: 4 }}>Side</div>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: totalSide === 15 ? "#34D399" : totalSide > 0 ? "#F59E0B" : "rgba(255,255,255,0.3)" }}>{totalSide}</div>
+                      </div>
+                      <div style={{ ...C, padding: "10px 14px", flex: 1, textAlign: "center" }}>
+                        <div style={{ ...M, fontSize: 9, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", marginBottom: 4 }}>Unique</div>
+                        <div style={{ fontSize: 18, fontWeight: 700 }}>{new Set(parsedCards.map(c => c.name)).size}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Results */}
+                {parsedCards.length > 0 && (
+                  <div>
+                    {[{ label: "Mainboard", cards: mainCards }, { label: "Sideboard", cards: sideCards }]
+                      .filter(g => g.cards.length > 0)
+                      .map(group => (
+                        <div key={group.label} style={{ marginBottom: 24 }}>
+                          <h3 style={{ fontSize: 13, fontWeight: 600, margin: "0 0 10px", color: "rgba(255,255,255,0.5)" }}>
+                            {group.label} ({group.cards.reduce((s, c) => s + c.qty, 0)})
+                          </h3>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            {group.cards.map((card, i) => (
+                              <div key={i} style={{
+                                display: "flex", alignItems: "center", gap: 10, padding: "8px 12px",
+                                borderRadius: 6, background: "rgba(255,255,255,0.015)",
+                                border: "1px solid rgba(255,255,255,0.03)", transition: "background 0.1s",
+                              }}
+                                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.035)"}
+                                onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.015)"}
+                              >
+                                {/* Card image thumbnail */}
+                                {cardImages[card.name] ? (
+                                  <img src={cardImages[card.name]} alt={card.name} style={{ width: 32, height: 44, borderRadius: 3, objectFit: "cover", flexShrink: 0 }} />
+                                ) : (
+                                  <div style={{ width: 32, height: 44, borderRadius: 3, background: "rgba(255,255,255,0.05)", flexShrink: 0 }} />
+                                )}
+
+                                {/* Qty */}
+                                <span style={{ ...M, fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.4)", width: 20, textAlign: "center", flexShrink: 0 }}>{card.qty}x</span>
+
+                                {/* Name */}
+                                <span style={{ fontSize: 13, fontWeight: 500, flex: 1 }}>{card.name}</span>
+
+                                {/* Store links */}
+                                <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                                  {STORES.map(store => (
+                                    <a key={store.key} href={store.url(card.name)} target="_blank" rel="noopener noreferrer" style={{
+                                      ...M, fontSize: 9, fontWeight: 600, padding: "3px 8px", borderRadius: 4,
+                                      background: `${store.color}12`, color: store.color, textDecoration: "none",
+                                      border: `1px solid ${store.color}25`, transition: "all 0.1s",
+                                      whiteSpace: "nowrap",
+                                    }}
+                                      onMouseEnter={e => { e.currentTarget.style.background = `${store.color}25`; }}
+                                      onMouseLeave={e => { e.currentTarget.style.background = `${store.color}12`; }}
+                                    >
+                                      {store.name}
+                                    </a>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+
+                    {/* Bulk open buttons */}
+                    <div style={{ marginTop: 20, ...C, padding: "16px 20px" }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Bulk search entire decklist</div>
+                      <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 12, lineHeight: 1.5 }}>
+                        Good Games and Games Portal both have deck builder / multi-card search tools.
+                        Click below to open your full decklist on their site.
+                      </p>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <a href="https://tcg.goodgames.com.au/pages/mtg-deck-builder" target="_blank" rel="noopener noreferrer" style={{
+                          ...M, fontSize: 11, fontWeight: 600, padding: "8px 16px", borderRadius: 6,
+                          background: "rgba(79,142,247,0.1)", color: "#4F8EF7", textDecoration: "none",
+                          border: "1px solid rgba(79,142,247,0.2)", transition: "all 0.15s",
+                        }}>Good Games deck builder →</a>
+                        <a href="https://gamesportal.com.au/pages/multi-card-search" target="_blank" rel="noopener noreferrer" style={{
+                          ...M, fontSize: 11, fontWeight: 600, padding: "8px 16px", borderRadius: 6,
+                          background: "rgba(245,158,11,0.1)", color: "#F59E0B", textDecoration: "none",
+                          border: "1px solid rgba(245,158,11,0.2)", transition: "all 0.15s",
+                        }}>Games Portal multi-search →</a>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
           );
